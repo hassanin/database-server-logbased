@@ -39,7 +39,7 @@ namespace database_server
             //var ts = myDatabase.Add("Mohamed", "Ahmed").Result;
             Stopwatch stopwatch = new Stopwatch();
             stopwatch.Start();
-            for (int i = 5; i < 20; i++)
+            for (int i = 1000; i < 2000; i++)
             {
                 myDatabase.Add($"user{i}", $"I am honest Jack {i*25}").Wait();
             }
@@ -48,9 +48,9 @@ namespace database_server
 
             var valuex = myDatabase.Get("user10").Result;
             logger.LogInformation($" User10 is {valuex}");
-            logger.LogInformation($" User12 is {myDatabase.Get("user12").Result}");
-            logger.LogInformation($" User99 is {myDatabase.Get("user99").Result}");
-            logger.LogInformation($" User205 is {myDatabase.Get("user205").Result}");
+            logger.LogInformation($" User12 is {myDatabase.Get("user1001").Result}");
+            logger.LogInformation($" User99 is {myDatabase.Get("user1100").Result}");
+            logger.LogInformation($" User205 is {myDatabase.Get("user1050").Result}");
 
             //Thread.Sleep(4000);
             Console.ReadLine();

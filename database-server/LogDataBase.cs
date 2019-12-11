@@ -16,11 +16,12 @@ namespace database_server
         private static int fileCounter;
         private Stream memStream;
         private ReaderWriterLock mainStreamLock = new ReaderWriterLock();
-        private StreamReader memStreamreader;
         private TextWriter activeFileStream;
         //private UnicodeEncoding uniEncoding = new UnicodeEncoding();
         private ASCIIEncoding asciEncoding = new ASCIIEncoding();
         private const int numThreads = 3;
+        private readonly int writeToDiskAfter;
+        private int currentWriteCount=0;
         private Semaphore semaphore = new Semaphore(numThreads, numThreads);
         public async Task<bool> Add(string Key, string Value)
         {
@@ -28,6 +29,7 @@ namespace database_server
             var writtenValue = r.getRecordRepresentastion();
             //logger.LogInformation($"record added is {writtenValue}");
             mainStreamLock.AcquireWriterLock(0); // wait indefinetly
+            
             try
             {
                 if (mode == DataBaseMode.ASYNCHORUS)
@@ -44,6 +46,12 @@ namespace database_server
                     await memStream.FlushAsync();
                     await activeFileStream.FlushAsync();
                 }
+                Interlocked.Increment(ref currentWriteCount);
+                if (currentWriteCount >= writeToDiskAfter)
+                {
+                    startNewLogFile();
+                    currentWriteCount = 0;
+                }
             }
             catch(Exception ex)
             {
@@ -57,18 +65,35 @@ namespace database_server
            
             return true;
         }
+        private void startNewLogFile()
+        {
+            oldLogsFileList.Add($"./oldLogs/dbFile-{fileCounter}.dat"); // the old file becomes one of the newest files
+                                                                        //oldLogsFileList.ins
+            fileCounter++;
+            var activeFilePath = $"./oldLogs/dbFile-{fileCounter}.dat";
+            activeFileStream.Close();
+            activeFileStream.Dispose();
+            activeFileStream = TextWriter.Synchronized(new StreamWriter(activeFilePath));
+            memStream.Close();
+            memStream.Dispose();
+            memStream = getNewMemoryStream();
+        }
 
         //[MethodImpl(MethodImplOptions.Synchronized)]
         public async Task<String?> Get(string Key)
         {
-            mainStreamLock.AcquireReaderLock(0);
+            //oldLogsFileList.ForEach((s) => { logger.LogInformation($"File name is {s}"); });
             try
             {
+                mainStreamLock.AcquireReaderLock(0);
+                
+                var memStreamreader = new StreamReader(memStream); // do not use 'using' otherwise the stream gets disposed!
                 memStreamreader.BaseStream.Seek(0, SeekOrigin.Begin);
                 // This checks the in-memory file
                 while (!memStreamreader.EndOfStream)
                 {
-                    String? readLine = await memStreamreader.ReadLineAsync();
+                    //String? readLine = await memStreamreader.ReadLineAsync().ConfigureAwait(true);
+                    String? readLine = memStreamreader.ReadLineAsync().Result;
                     //logger.LogInformation(readLine);
                     var parts = readLine.Split("\t");
                     if (parts[0] == Key)
@@ -92,10 +117,11 @@ namespace database_server
    
         private async Task<String> searchInOldLogs(String key)
         {
-          semaphore.WaitOne(); // will use a semaphore here!
+         
            try
             {
-
+                semaphore.WaitOne(); // will use a semaphore here!
+                
                 foreach (var oldFile in oldLogsFileList)
                 {
                     using var myStreamReader = new StreamReader(oldFile);
@@ -126,22 +152,29 @@ namespace database_server
         // List of stream readers
         private List<String> oldLogsFileList;
         private DataBaseMode mode;
-        public LogDataBase( DataBaseMode mode = DataBaseMode.SYNCHRONOUS)
+       /**
+        * 
+        */
+        public LogDataBase( DataBaseMode mode = DataBaseMode.SYNCHRONOUS,int writeToDiskAfter=200)
         {
             oldLogsFileList = new List<String>();
             this.mode = mode;
             initalizeDatabase();
-            memStream = MemoryStream.Synchronized(new MemoryStream());
-            memStreamreader = new StreamReader(memStream);
+            memStream = getNewMemoryStream(); 
+            //memStreamreader = new StreamReader(memStream);
             var activeFilePath = $"./oldLogs/dbFile-{fileCounter}.dat";
             activeFileStream = TextWriter.Synchronized(new StreamWriter(activeFilePath));
-
+            this.writeToDiskAfter = writeToDiskAfter;
             //var er = new StreamWriter()
         }
         public enum DataBaseMode
         {
             SYNCHRONOUS,
             ASYNCHORUS
+        }
+        private Stream getNewMemoryStream()
+        {
+            return MemoryStream.Synchronized(new MemoryStream()); // does it need to be Synchorized, We are using a ReaderWriterLock to Protect this resource?
         }
         private void initalizeDatabase()
         {
@@ -157,6 +190,7 @@ namespace database_server
                 foreach (var file in files)
                 {
                     oldLogsFileList.Add(file.FullName);
+                    
                 }
             }
             catch(Exception ex)
@@ -189,6 +223,7 @@ namespace database_server
                     activeFileStream.Close();
                     memStream.Flush();
                     memStream.Close();
+                    semaphore.Dispose();
                 }
 
                 // TODO: free unmanaged resources (unmanaged objects) and override a finalizer below.
