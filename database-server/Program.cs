@@ -41,7 +41,9 @@ namespace database_server
             stopwatch.Start();
             for (int i = 1000; i < 2000; i++)
             {
-                myDatabase.Add($"user{i}", $"I am honest Jack {i*25}").Wait();
+                myDatabase.Add($"user{i}", $"I am honest Jack {3*i}").Wait();
+                myDatabase.Add($"user{i}", $"I am honest Jack {2*i}").Wait();
+                myDatabase.Add($"user{i}", $"I am honest Jack {3 * i}").Wait();
             }
             stopwatch.Stop();
             logger.LogInformation($"Elapsed time is {stopwatch.ElapsedMilliseconds}");

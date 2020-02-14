@@ -22,7 +22,18 @@ namespace database_server
         private const int numThreads = 3;
         private readonly int writeToDiskAfter;
         private int currentWriteCount=0;
+        private const int maxFilesBeforeCompaction = 10;
+        private int maxFileCounter = 0;
+        // List of stream readers
+        //private List<String> oldLogsFileList;
+        private DataBaseMode mode;
         private Semaphore semaphore = new Semaphore(numThreads, numThreads);
+        SortedList<String, string> oldLogsSortedList = new SortedList<string, string>(Comparer<String>.Create((s1, s2) =>
+        {
+            int number1 = getFileNumber(s1);
+            int number2 = getFileNumber(s2);
+            return number2.CompareTo(number1);
+        }));
         public async Task<bool> Add(string Key, string Value)
         {
             Record r = new Record(Key,Value);
@@ -67,7 +78,7 @@ namespace database_server
         }
         private void startNewLogFile()
         {
-            oldLogsFileList.Add($"./oldLogs/dbFile-{fileCounter}.dat"); // the old file becomes one of the newest files
+            oldLogsSortedList.Add($"./oldLogs/dbFile-{fileCounter}.dat", $"./oldLogs/dbFile-{fileCounter}.dat"); // the old file becomes one of the newest files
                                                                         //oldLogsFileList.ins
             fileCounter++;
             var activeFilePath = $"./oldLogs/dbFile-{fileCounter}.dat";
@@ -85,6 +96,8 @@ namespace database_server
             //oldLogsFileList.ForEach((s) => { logger.LogInformation($"File name is {s}"); });
             try
             {
+                string memoryValue = null;
+                bool foundInMemory = false;
                 mainStreamLock.AcquireReaderLock(0);
                 
                 var memStreamreader = new StreamReader(memStream); // do not use 'using' otherwise the stream gets disposed!
@@ -95,12 +108,16 @@ namespace database_server
                     //String? readLine = await memStreamreader.ReadLineAsync().ConfigureAwait(true);
                     String? readLine = memStreamreader.ReadLineAsync().Result;
                     //logger.LogInformation(readLine);
-                    var parts = readLine.Split("\t");
-                    if (parts[0] == Key)
+                    var record = Record.getRecordFromString(readLine);
+                    
+                    if (record.Key == Key)
                     {
-                        return parts[1];
+                        foundInMemory = true;
+                        memoryValue = record.isDead ? null : record.Value;
                     }
                 }
+                if (foundInMemory)
+                    return memoryValue;
             }
             catch(Exception ex)
             {
@@ -111,10 +128,43 @@ namespace database_server
             {
                 mainStreamLock.ReleaseReaderLock();
             }
+            
                 return searchInOldLogs(Key).Result;
             
         }
-   
+
+        private async Task<String> compactOldFiles(string oldFilePath,string newFilePath)
+        {
+            var files = new String[] { oldFilePath, newFilePath }; // order matter here!
+            Dictionary<String, (String value, bool isDead)> keyValuePairs = new Dictionary<string, (string, bool)>();
+            foreach (var file in files)
+            {
+                using var fileReader = new StreamReader(file);
+                while (!fileReader.EndOfStream)
+                {
+                    var readLine = await fileReader.ReadLineAsync();
+                    var record = Record.getRecordFromString(readLine);
+                    keyValuePairs[record.Key] = (record.Value, record.isDead);
+                }
+            }
+
+            // Writing the map to disk
+            string newFileName = $"db-File-{getEpochTime()}";
+            using StreamWriter sw = new StreamWriter(newFileName);
+            foreach(var element in keyValuePairs)
+            {
+                Record r = new Record(element.Key, element.Value.value, element.Value.isDead);
+                await sw.WriteAsync(r.getRecordRepresentastion());
+            }
+            return null;
+        }
+         
+        private static long getEpochTime()
+        {
+            DateTime epoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            long ms = (long)(DateTime.UtcNow - epoch).TotalMilliseconds;
+            return ms;
+        }
         private async Task<String> searchInOldLogs(String key)
         {
          
@@ -122,17 +172,26 @@ namespace database_server
             {
                 semaphore.WaitOne(); // will use a semaphore here!
                 
-                foreach (var oldFile in oldLogsFileList)
+                foreach (var oldFileEntry in oldLogsSortedList)
                 {
+                    var oldFile = oldFileEntry.Value;
+                    bool foundinFile = false;
+                    string returnValue = null;
                     using var myStreamReader = new StreamReader(oldFile);
                     while (!myStreamReader.EndOfStream)
                     {
                         var readLine = await myStreamReader.ReadLineAsync();
-                        var parts = readLine.Split("\t");
-                        if (parts[0] == key)
+                       
+                        var record = Record.getRecordFromString(readLine);
+                        if (record.Key == key)
                         {
-                            return parts[1];
+                            foundinFile = true;
+                            returnValue = record.isDead ? null : record.Value;
                         }
+                    }
+                    if(foundinFile==true)
+                    {
+                        return returnValue;
                     }
                 }
             }
@@ -149,15 +208,13 @@ namespace database_server
             return null; 
         }
 
-        // List of stream readers
-        private List<String> oldLogsFileList;
-        private DataBaseMode mode;
+     
        /**
         * 
         */
         public LogDataBase( DataBaseMode mode = DataBaseMode.SYNCHRONOUS,int writeToDiskAfter=200)
         {
-            oldLogsFileList = new List<String>();
+            //oldLogsFileList = new List<String>();
             this.mode = mode;
             initalizeDatabase();
             memStream = getNewMemoryStream(); 
@@ -165,7 +222,16 @@ namespace database_server
             var activeFilePath = $"./oldLogs/dbFile-{fileCounter}.dat";
             activeFileStream = TextWriter.Synchronized(new StreamWriter(activeFilePath));
             this.writeToDiskAfter = writeToDiskAfter;
-            //var er = new StreamWriter()
+            
+        }
+        private void performCompaction()
+        {
+            if(oldLogsSortedList.Count > maxFilesBeforeCompaction)
+            {
+                // Need to use a sorted list data structure where the oldest files are always the first in the list
+                var oldFile = oldLogsSortedList.ElementAt(0).Key;
+                var newFile = oldLogsSortedList.ElementAt(1).Key;
+            }
         }
         public enum DataBaseMode
         {
@@ -184,12 +250,12 @@ namespace database_server
                 DirectoryInfo oldLogsDir = new DirectoryInfo(oldLogsDirName);
                 var files = oldLogsDir.GetFiles("*.dat").OrderBy((s1)=> { return s1.FullName; },
                     Comparer<String>.Create((s1,s2) => { return String.Compare(s1,s2,System.StringComparison.InvariantCulture); })).ToArray(); // ascending comparison, assuming oldest file has smaller number
-                //files.OrderBy()
                 logger.LogInformation($"Number of databse files found is {files.Length}");
                 fileCounter = files.Length;
                 foreach (var file in files)
                 {
-                    oldLogsFileList.Add(file.FullName);
+                    oldLogsSortedList.Add(file.Name, file.Name);
+              
                     
                 }
             }
@@ -201,7 +267,14 @@ namespace database_server
         }
       
 
-
+        private static int getFileNumber(string fileName)
+        {
+            int numberBegiing = fileName.IndexOf("-");
+            int numberEnd = fileName.IndexOf(".");
+            String number1String = fileName.Substring(numberBegiing, numberEnd - numberBegiing);
+            int number1 = int.Parse(number1String);
+            return number1;
+        }
 
 
 
@@ -216,9 +289,10 @@ namespace database_server
                 {
                     // TODO: dispose managed state (managed objects).
                     // Clear streams
-                    oldLogsFileList.ForEach(sr => {
+                    
+                    //oldLogsSortedList.ForEach(sr => {
                        
-                    });
+                    //});
                     activeFileStream.Flush();
                     activeFileStream.Close();
                     memStream.Flush();

@@ -20,5 +20,21 @@ namespace database_server
 
             return (Key + "\t" + Value + "\t" + isDead.ToString() + Environment.NewLine);
         }
+        public static Record getRecordFromString(String representation)
+        {
+            var parts = representation.Split("\t");
+            string key = parts[0];
+            string value = parts[1];
+            bool isDead;
+            bool isSuccess = Boolean.TryParse(parts[2],out isDead);
+            if (isSuccess)
+            {
+                return new Record(key, value, isDead);
+            }
+            else
+            {
+                throw new ArgumentException("Could not parse argument");
+            }
+        }
     }
 }
