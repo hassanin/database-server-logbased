@@ -1,41 +1,35 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using log4net;
+using log4net.Repository.Hierarchy;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 //using Microsoft.Extensions.Logging
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
-
 namespace database_server
 {
     class Program
     {
-        internal static ILogger mainLogger;
+       
+        private static readonly log4net.ILog logger =
+            log4net.LogManager.GetLogger(System.Reflection.MethodBase.GetCurrentMethod().DeclaringType);
         static void Main(string[] args)
         {
-        
-
-            
-            var loggerFactory = LoggerFactory.Create(builder =>
-            {
-                builder
-                    .AddFilter("Microsoft", LogLevel.Warning)
-                    .AddFilter("System", LogLevel.Warning)
-                    .AddFilter("LoggingConsoleApp.Program", LogLevel.Debug)
-                    .AddEventLog()
-                    .AddConsole((s) => { Console.WriteLine(s); s.IncludeScopes = false; });
-
-            });
-            
-     
-            ILogger logger = loggerFactory.CreateLogger<Program>();
-            mainLogger = logger;
-            logger.LogInformation("Example log message");
-            logger.LogDebug("Mohamed");
+            var hierarchy = (Hierarchy)LogManager.GetRepository(Assembly.GetExecutingAssembly());
+            log4net.Config.BasicConfigurator.Configure(hierarchy);
+            logger.Info("Example log message");
+            logger.Debug("Mohamed");
+            //var testDirectory = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+            //testDire testDirectory.Split(".")[0];
+            //Directory.CreateDirectory(testDirectory);
+            //logger.Info($"Created Directory is {testDirectory}");
             //logger.LogError("I have erroored");
-            Console.WriteLine(logger.IsEnabled(LogLevel.Information));
-            using var myDatabase = new LogDataBase(LogDataBase.DataBaseMode.ASYNCHORUS);
+            var myDatabase = LogDataBase.getTheDatabase(LogDataBase.DataBaseMode.ASYNCHORUS);
 
+            BasicHttpListener basicHttpListener = new BasicHttpListener();
             //var ts = myDatabase.Add("Mohamed", "Ahmed").Result;
             Stopwatch stopwatch = new Stopwatch();
             stopwatch.Start();
@@ -46,16 +40,29 @@ namespace database_server
                 myDatabase.Add($"user{i}", $"I am honest Jack {3 * i}").Wait();
             }
             stopwatch.Stop();
-            logger.LogInformation($"Elapsed time is {stopwatch.ElapsedMilliseconds}");
+            logger.Info($"Elapsed time is {stopwatch.ElapsedMilliseconds}");
 
             var valuex = myDatabase.Get("user10").Result;
-            logger.LogInformation($" User10 is {valuex}");
-            logger.LogInformation($" User12 is {myDatabase.Get("user1001").Result}");
-            logger.LogInformation($" User99 is {myDatabase.Get("user1100").Result}");
-            logger.LogInformation($" User205 is {myDatabase.Get("user1050").Result}");
+            logger.Info($" User10 is {valuex}");
+            logger.Info($" User12 is {myDatabase.Get("user1001").Result}");
+            logger.Info($" User99 is {myDatabase.Get("user1100").Result}");
+            logger.Info($" User205 is {myDatabase.Get("user1050").Result}");
 
             //Thread.Sleep(4000);
-            Console.ReadLine();
+            //Console.ReadLine();
+            Console.CancelKeyPress += (o,e) =>
+            {
+                e.Cancel = false;
+                Console.WriteLine("Caught ctrl -c , shutting down server");
+                var terminationResult = basicHttpListener.TerminateServer(5000); // will block until server timesOut
+                Console.WriteLine("Finished ctrl -c , shutting down server");
+                Thread.Sleep(2000);
+
+                
+                System.Environment.Exit(0);
+            };
+            while (true) { }
+
 
         }
         private static Random random = new Random();

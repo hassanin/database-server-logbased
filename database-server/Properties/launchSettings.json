@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "database-server": {
+      "commandName": "Project"
+    },
+    "Docker": {
+      "commandName": "Docker"
+    }
+  }
+}

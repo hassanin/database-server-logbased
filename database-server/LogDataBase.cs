@@ -10,9 +10,10 @@ using System.Threading;
 
 namespace database_server
 {
-    class LogDataBase : ITestDataBase, IDisposable
+    public class LogDataBase : ITestDataBase, IDisposable
     {
-        private ILogger logger = Program.mainLogger;
+        private static readonly log4net.ILog logger =
+             log4net.LogManager.GetLogger(System.Reflection.MethodBase.GetCurrentMethod().DeclaringType);
         private static int fileCounter;
         private Stream memStream;
         private ReaderWriterLock mainStreamLock = new ReaderWriterLock();
@@ -22,8 +23,12 @@ namespace database_server
         private const int numThreads = 3;
         private readonly int writeToDiskAfter;
         private int currentWriteCount=0;
-        private const int maxFilesBeforeCompaction = 10;
+        private const int maxFilesBeforeCompaction = 3;
         private int maxFileCounter = 0;
+        private Thread compactionThread;
+        private static LogDataBase theSingleton;
+        private string oldLogsDirectory = "./oldLogs";
+        System.Timers.Timer timer = new System.Timers.Timer(TimeSpan.FromSeconds(5).TotalMilliseconds);
         // List of stream readers
         //private List<String> oldLogsFileList;
         private DataBaseMode mode;
@@ -50,12 +55,13 @@ namespace database_server
                     memStream.FlushAsync();
                     activeFileStream.FlushAsync();
                 }
+                // The below code is broken
                 else
                 {
-                    await memStream.WriteAsync(asciEncoding.GetBytes(writtenValue));
-                    await activeFileStream.WriteAsync(writtenValue);
-                    await memStream.FlushAsync();
-                    await activeFileStream.FlushAsync();
+                    memStream.WriteAsync(asciEncoding.GetBytes(writtenValue)).GetAwaiter().GetResult();
+                    activeFileStream.WriteAsync(writtenValue).Wait();
+                    memStream.FlushAsync().Wait();
+                    activeFileStream.FlushAsync().Wait();
                 }
                 Interlocked.Increment(ref currentWriteCount);
                 if (currentWriteCount >= writeToDiskAfter)
@@ -66,7 +72,7 @@ namespace database_server
             }
             catch(Exception ex)
             {
-                logger.LogError($"Caught Exception while writing entry  in main memory stream log, execption caught {ex}");
+                logger.Error($"Caught Exception while writing entry  in main memory stream log, execption caught {ex}");
                 throw;
             }
             finally
@@ -78,10 +84,10 @@ namespace database_server
         }
         private void startNewLogFile()
         {
-            oldLogsSortedList.Add($"./oldLogs/dbFile-{fileCounter}.dat", $"./oldLogs/dbFile-{fileCounter}.dat"); // the old file becomes one of the newest files
+            oldLogsSortedList.Add($"{oldLogsDirectory}/dbFile-{fileCounter}.dat", $"{oldLogsDirectory}/dbFile-{fileCounter}.dat"); // the old file becomes one of the newest files
                                                                         //oldLogsFileList.ins
             fileCounter++;
-            var activeFilePath = $"./oldLogs/dbFile-{fileCounter}.dat";
+            var activeFilePath = $"{oldLogsDirectory}/dbFile-{fileCounter}.dat";
             activeFileStream.Close();
             activeFileStream.Dispose();
             activeFileStream = TextWriter.Synchronized(new StreamWriter(activeFilePath));
@@ -121,7 +127,7 @@ namespace database_server
             }
             catch(Exception ex)
             {
-                logger.LogError($"Caught Exception while searching in main memory stream log, execption caught {ex}");
+                logger.Error($"Caught Exception while searching in main memory stream log, execption caught {ex}");
                 throw;
             }
             finally
@@ -149,20 +155,22 @@ namespace database_server
             }
 
             // Writing the map to disk
-            string newFileName = $"db-File-{getEpochTime()}";
+            string newFileName = oldFilePath + "TMP";
             using StreamWriter sw = new StreamWriter(newFileName);
             foreach(var element in keyValuePairs)
             {
                 Record r = new Record(element.Key, element.Value.value, element.Value.isDead);
                 await sw.WriteAsync(r.getRecordRepresentastion());
             }
-            return null;
+            
+            return newFileName;
         }
          
         private static long getEpochTime()
         {
             DateTime epoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
             long ms = (long)(DateTime.UtcNow - epoch).TotalMilliseconds;
+            
             return ms;
         }
         private async Task<String> searchInOldLogs(String key)
@@ -171,9 +179,9 @@ namespace database_server
            try
             {
                 semaphore.WaitOne(); // will use a semaphore here!
-                
-                foreach (var oldFileEntry in oldLogsSortedList)
+                for(int i=oldLogsSortedList.Count-1;i>= 0; i--) // have to search in reverse order, from newest to oldest
                 {
+                    var oldFileEntry = oldLogsSortedList.ElementAt(i);
                     var oldFile = oldFileEntry.Value;
                     bool foundinFile = false;
                     string returnValue = null;
@@ -197,7 +205,7 @@ namespace database_server
             }
             catch(Exception ex)
             {
-                logger.LogError($"Caught Exception while searching for old Logs, execption caught {ex}");
+                logger.Error($"Caught Exception while searching for old Logs, execption caught {ex}");
                 throw ;
             }
             finally
@@ -208,31 +216,76 @@ namespace database_server
             return null; 
         }
 
-     
+        private void startNewThread()
+        {
+            compactionThread = new Thread(async (t) =>
+            {
+                while(true)
+                {
+                    await Task.Delay(1000 * 5);
+                    Console.WriteLine("Performing Compaction!");
+                    performCompaction();
+                }
+            });
+            compactionThread.Start();
+        }
        /**
         * 
         */
-        public LogDataBase( DataBaseMode mode = DataBaseMode.SYNCHRONOUS,int writeToDiskAfter=200)
+
+        public static LogDataBase getTheDatabase(DataBaseMode mode = DataBaseMode.SYNCHRONOUS, int writeToDiskAfter = 200, string logDirectory="./oldLogs")
+        {
+            if(theSingleton == null)
+            {
+                theSingleton = new LogDataBase(mode,writeToDiskAfter,logDirectory);
+            }
+            return theSingleton;
+        }
+        private LogDataBase( DataBaseMode mode = DataBaseMode.SYNCHRONOUS,int writeToDiskAfter=200, string logDirectory = "./oldLogs")
         {
             //oldLogsFileList = new List<String>();
+            this.oldLogsDirectory = logDirectory;
             this.mode = mode;
             initalizeDatabase();
             memStream = getNewMemoryStream(); 
             //memStreamreader = new StreamReader(memStream);
-            var activeFilePath = $"./oldLogs/dbFile-{fileCounter}.dat";
+            var activeFilePath = $"{oldLogsDirectory}/dbFile-{fileCounter}.dat";
             activeFileStream = TextWriter.Synchronized(new StreamWriter(activeFilePath));
             this.writeToDiskAfter = writeToDiskAfter;
-            
+            //performPeriodicComapction2();
+            startNewThread();
         }
         private void performCompaction()
         {
-            if(oldLogsSortedList.Count > maxFilesBeforeCompaction)
+            if(oldLogsSortedList.Count > maxFilesBeforeCompaction && (oldLogsSortedList.Count > 3)) // There has to be at least 2 files to compact + 1 current
             {
                 // Need to use a sorted list data structure where the oldest files are always the first in the list
-                var oldFile = oldLogsSortedList.ElementAt(0).Key;
-                var newFile = oldLogsSortedList.ElementAt(1).Key;
+                var listCount = oldLogsSortedList.Count;
+                var oldFile = oldLogsSortedList.ElementAt(listCount-1).Value;
+                var newFile = oldLogsSortedList.ElementAt(listCount-2).Value;
+                string newFileMerged = compactOldFiles(oldFile, newFile).Result;
+                mainStreamLock.AcquireWriterLock(0); // wait indefinetly
+                try
+                {
+                    File.Delete(oldFile);
+                    //oldLogsSortedList.RemoveAt(listCount-1); // remove the old log file
+                    File.Move(newFileMerged, oldFile, true);
+                    File.Delete(newFile);
+                    oldLogsSortedList.RemoveAt(listCount - 2); // remove the old log file
+                    
+                    Console.WriteLine("Done with compaction!");
+                }
+                catch(Exception ex)
+                {
+
+                }
+                finally
+                {
+                    mainStreamLock.ReleaseWriterLock();
+                }
             }
         }
+        
         public enum DataBaseMode
         {
             SYNCHRONOUS,
@@ -246,22 +299,23 @@ namespace database_server
         {
             try
             {
-                var oldLogsDirName = "./oldLogs";
+                var oldLogsDirName = oldLogsDirectory;
                 DirectoryInfo oldLogsDir = new DirectoryInfo(oldLogsDirName);
                 var files = oldLogsDir.GetFiles("*.dat").OrderBy((s1)=> { return s1.FullName; },
                     Comparer<String>.Create((s1,s2) => { return String.Compare(s1,s2,System.StringComparison.InvariantCulture); })).ToArray(); // ascending comparison, assuming oldest file has smaller number
-                logger.LogInformation($"Number of databse files found is {files.Length}");
-                fileCounter = files.Length;
+                logger.Info($"Number of databse files found is {files.Length}");
+                //fileCounter = files.Length;
                 foreach (var file in files)
                 {
-                    oldLogsSortedList.Add(file.Name, file.Name);
-              
-                    
+                    oldLogsSortedList.Add(file.Name, file.FullName);
+                    int fileNumber = getFileNumber(file.Name);
+                    maxFileCounter = Math.Max(fileNumber, maxFileCounter);
                 }
+                fileCounter = maxFileCounter+1;
             }
             catch(Exception ex)
             {
-                logger.LogError(ex, "Caught exception wile inatilizaing data base main files, rethrowing the exception");
+                logger.Error(ex + " Caught exception wile inatilizaing data base main files, rethrowing the exception");
                 throw ex;
             }
         }
@@ -269,8 +323,8 @@ namespace database_server
 
         private static int getFileNumber(string fileName)
         {
-            int numberBegiing = fileName.IndexOf("-");
-            int numberEnd = fileName.IndexOf(".");
+            int numberBegiing = fileName.IndexOf("-") + 1;
+            int numberEnd = fileName.LastIndexOf(".");
             String number1String = fileName.Substring(numberBegiing, numberEnd - numberBegiing);
             int number1 = int.Parse(number1String);
             return number1;
