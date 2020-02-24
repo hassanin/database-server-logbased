@@ -300,6 +300,10 @@ namespace database_server
             try
             {
                 var oldLogsDirName = oldLogsDirectory;
+                if(!Directory.Exists(oldLogsDirName))
+                {
+                    Directory.CreateDirectory(oldLogsDirName);
+                }
                 DirectoryInfo oldLogsDir = new DirectoryInfo(oldLogsDirName);
                 var files = oldLogsDir.GetFiles("*.dat").OrderBy((s1)=> { return s1.FullName; },
                     Comparer<String>.Create((s1,s2) => { return String.Compare(s1,s2,System.StringComparison.InvariantCulture); })).ToArray(); // ascending comparison, assuming oldest file has smaller number
