@@ -6,9 +6,9 @@ This project implemnets a simple databse using the local file system. It perform
 
 # example usage
 mainDatabase = LogDataBase.getTheDatabase(mode: LogDataBase.DataBaseMode.SYNCHRONOUS, writeToDiskAfter: 10);
-String key = $"Mohamed-{i}";
-String insertedValue = $"test123213213-{i}";
-mainDatabase.Add(key, insertedValue).Wait();
-var retrievedValue = mainDatabase.Get(key).Result;
-Assert.AreEqual(retrievedValue, insertedValue);
+String key = $"Mohamed-{i}"; <br/>
+String insertedValue = $"test123213213-{i}"; <br/>
+mainDatabase.Add(key, insertedValue).Wait(); <br/>
+var retrievedValue = mainDatabase.Get(key).Result; <br/>
+Assert.AreEqual(retrievedValue, insertedValue); <br/>
 
