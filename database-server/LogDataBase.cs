@@ -41,7 +41,11 @@ namespace database_server
         }));
         public async Task<bool> Add(string Key, string Value)
         {
-            Record r = new Record(Key,Value);
+            return await Add(Key, Value, false);
+        }
+        private async Task<bool> Add(string Key, string Value, bool isDead=false)
+        {
+            Record r = new Record(Key,Value,isDead);
             var writtenValue = r.getRecordRepresentastion();
             //logger.LogInformation($"record added is {writtenValue}");
             mainStreamLock.AcquireWriterLock(0); // wait indefinetly
@@ -95,7 +99,15 @@ namespace database_server
             memStream.Dispose();
             memStream = getNewMemoryStream();
         }
+        public async Task<bool> Remove(string Key)
+        {
+            var foundValue = await Get(Key);
+            if (foundValue == null) // No element was presnet in the database, hence we will return false
+                return false;
+            await Add(Key, foundValue, isDead: true); //
+            return true; // item was found and deleted in the database
 
+        }
         //[MethodImpl(MethodImplOptions.Synchronized)]
         public async Task<String?> Get(string Key)
         {

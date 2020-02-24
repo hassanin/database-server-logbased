@@ -38,25 +38,23 @@ namespace UnitTestDataBaseServer
                 var retrievedValue = mainDatabase.Get(key).Result;
                 Assert.AreEqual(retrievedValue, Value);
             }
-            //var myFiles = Directory.EnumerateFiles(testDirectory);
-            //var numElemetsReal = myFiles.Count();
-            //var numElementsExpected = numElements / 10 + 1;
-            //Assert.AreEqual(numElementsExpected, numElements);
-            
-        }
-        [TestCleanup]
-        public void testClean()
-        {
-            
-            
-        }
-
-        [TestInitialize]
-        public void testInit()
-        {
            
             
         }
+        [TestMethod]
+        public void TestRemove()
+        {
+            String key = "Mohamed12";
+            String Value = "test12321321334";
+            mainDatabase.Add(key, Value).Wait();
+            var retrievedValue = mainDatabase.Get(key).Result;
+            Assert.AreEqual(retrievedValue, Value);
+            var removalResult= mainDatabase.Remove(Key: key).Result;
+            Assert.AreEqual(true, removalResult);
+            retrievedValue = mainDatabase.Get(key).Result;
+            Assert.AreEqual(retrievedValue, null);
+        }
+       
 
         [ClassInitialize]
         public static void InitClass(TestContext context)
@@ -78,6 +76,19 @@ namespace UnitTestDataBaseServer
 
         }
 
+        [TestCleanup]
+        public void testClean()
+        {
+
+
+        }
+
+        [TestInitialize]
+        public void testInit()
+        {
+
+
+        }
 
     }
 }
