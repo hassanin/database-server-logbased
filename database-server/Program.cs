@@ -44,7 +44,7 @@ namespace database_server
                 thread.Join();
             }
             Assert.IsTrue(true);
-            logger.Info("Finished!");
+            logger.Info("Finished!"); 
         }
         private static void DoMultiInsert(int numElements = 1000, string keyPrefix = "key", string valuePrefix = "value")
         {
