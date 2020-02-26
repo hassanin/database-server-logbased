@@ -6,6 +6,8 @@ using log4net.Repository.Hierarchy;
 using log4net;
 using System.Reflection;
 using System.Linq;
+using System.Threading.Tasks;
+using System.Threading;
 
 namespace UnitTestDataBaseServer
 {
@@ -29,17 +31,10 @@ namespace UnitTestDataBaseServer
         [TestMethod]
         public void TestMultiInsert()
         {
-            var numElements = 1000;
-            for (int i = 0; i < numElements; i++)
-            {
-                String key = $"Mohamed-{i}";
-                String Value = $"test123213213-{i}";
-                mainDatabase.Add(key, Value).Wait();
-                var retrievedValue = mainDatabase.Get(key).Result;
-                Assert.AreEqual(retrievedValue, Value);
-            }
-           
-            
+            DoMultiInsert(1000, "mykey1", "great");
+
+
+
         }
         [TestMethod]
         public void TestRemove()
@@ -53,6 +48,31 @@ namespace UnitTestDataBaseServer
             Assert.AreEqual(true, removalResult);
             retrievedValue = mainDatabase.Get(key).Result;
             Assert.AreEqual(retrievedValue, null);
+        }
+        [TestMethod]
+        public void TestParallel()
+        {
+            
+            //await Task.Delay(5000);
+            int numThreads = 5;
+            Thread[] myThreads = new Thread[numThreads];
+            for(int i=0;i<numThreads;i++)
+            {
+                myThreads[i]=new Thread(() => {
+                    DoMultiInsert(1000, $"{i}-{i}", $"value-{i}");
+                });
+                
+            }
+            foreach(var thread in myThreads)
+            {
+                thread.Start();
+            }
+            foreach (var thread in myThreads)
+            {
+                thread.Join();
+            }
+            Assert.IsTrue(false);
+            
         }
        
 
@@ -89,6 +109,20 @@ namespace UnitTestDataBaseServer
 
 
         }
+
+        private static void DoMultiInsert(int numElements=1000,string keyPrefix="key",string valuePrefix="value")
+        {
+            
+            for (int i = 0; i < numElements; i++)
+            {
+                String key = $"{keyPrefix}-{i}";
+                String Value = $"{valuePrefix}-{i}";
+                mainDatabase.Add(key, Value).Wait();
+                var retrievedValue = mainDatabase.Get(key).Result;
+                Assert.AreEqual(retrievedValue, Value);
+            }
+        }
+       
 
     }
 }

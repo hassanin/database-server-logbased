@@ -30,7 +30,7 @@ namespace database_server
             if (isSuccess)
             {
                 return new Record(key, value, isDead);
-            }
+            } 
             else
             {
                 throw new ArgumentException("Could not parse argument");

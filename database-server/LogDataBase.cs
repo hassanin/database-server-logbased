@@ -48,7 +48,7 @@ namespace database_server
             Record r = new Record(Key,Value,isDead);
             var writtenValue = r.getRecordRepresentastion();
             //logger.LogInformation($"record added is {writtenValue}");
-            mainStreamLock.AcquireWriterLock(0); // wait indefinetly
+            mainStreamLock.AcquireWriterLock(50000); // wait indefinetly
             
             try
             {
@@ -116,22 +116,31 @@ namespace database_server
             {
                 string memoryValue = null;
                 bool foundInMemory = false;
-                mainStreamLock.AcquireReaderLock(0);
-                
-                var memStreamreader = new StreamReader(memStream); // do not use 'using' otherwise the stream gets disposed!
+                //mainStreamLock.AcquireReaderLock(50000);
+                mainStreamLock.AcquireWriterLock(50000);
+                var memStreamreader = (new StreamReader(memStream)); // do not use 'using' otherwise the stream gets disposed!
                 memStreamreader.BaseStream.Seek(0, SeekOrigin.Begin);
                 // This checks the in-memory file
                 while (!memStreamreader.EndOfStream)
                 {
-                    //String? readLine = await memStreamreader.ReadLineAsync().ConfigureAwait(true);
-                    String? readLine = memStreamreader.ReadLineAsync().Result;
-                    //logger.LogInformation(readLine);
-                    var record = Record.getRecordFromString(readLine);
-                    
-                    if (record.Key == Key)
+                    String? readLine=null;
+                    try
                     {
-                        foundInMemory = true;
-                        memoryValue = record.isDead ? null : record.Value;
+                        //String? readLine = await memStreamreader.ReadLineAsync().ConfigureAwait(true);
+                        readLine = memStreamreader.ReadLineAsync().Result;
+                        //logger.LogInformation(readLine);
+                        var record = Record.getRecordFromString(readLine);
+
+                        if (record.Key == Key)
+                        {
+                            foundInMemory = true;
+                            memoryValue = record.isDead ? null : record.Value;
+                        }
+                    }
+                    catch(Exception ex2)
+                    {
+                        logger.Error($"Caught Exception while searching in main memory stream log, execption caught {ex2} with readline ${readLine}");
+                        throw;
                     }
                 }
                 if (foundInMemory)
@@ -256,6 +265,8 @@ namespace database_server
         private LogDataBase( DataBaseMode mode = DataBaseMode.SYNCHRONOUS,int writeToDiskAfter=200, string logDirectory = "./oldLogs")
         {
             //oldLogsFileList = new List<String>();
+            logger.Info("Inatilaing the database!");
+            logger.Info("Inatilaing the database!");
             this.oldLogsDirectory = logDirectory;
             this.mode = mode;
             initalizeDatabase();
@@ -276,7 +287,7 @@ namespace database_server
                 var oldFile = oldLogsSortedList.ElementAt(listCount-1).Value;
                 var newFile = oldLogsSortedList.ElementAt(listCount-2).Value;
                 string newFileMerged = compactOldFiles(oldFile, newFile).Result;
-                mainStreamLock.AcquireWriterLock(0); // wait indefinetly
+                mainStreamLock.AcquireWriterLock(50000); // wait indefinetly
                 try
                 {
                     File.Delete(oldFile);
